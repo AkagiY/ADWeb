@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html>
+<head>
+　<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+  <script src="jquery-3.4.1.min.js"></script>
+  <script src="jcanvas.min.js"></script>
+  <script type="text/javascript">
+
+    var TrafficParticipant =
+    {
+        EgoVehicle : 0,
+        Pedestrian : 1,
+        Cyclist : 2,
+        StopLine : 3
+    };
+
+    var Place  = 
+    {
+        Any : 0,
+        OnCourse : 1,
+        OnSideWalk : 2,
+        OnRoad : 3,
+        OnCrosswalk : 4
+    };
+
+    var EvalType =
+    {
+        DistanceLon : 0,
+        DistanceLat : 1,
+        TTC : 2
+    };
+
+    var OperationType =
+    {
+        Geator : 0,
+        Equal : 1,
+        Less : 2
+    };
+
+    class Evaluation
+    {
+        constructor()
+        {
+            this.EvalFuncID = EvalType.DistanceLon;
+            this.Operator = OperationType.Less;
+            this.Threshold = 200.0;
+        }
+    }
+
+    class Decision
+    {
+        constructor()
+        {
+            this.Name = 'rule01';
+            this.Description = '';
+            this.TargetType = TrafficParticipant.Pedestrian;
+            this.PositionID = Place.OnCrosswalk;
+            this.Conditions = [];
+            this.TargetSpeed = 0.0;
+        }
+    }
+
+    class Mobility
+    {
+        constructor(image_path,w,h) 
+        {
+            this.X = 0.0;
+            this.Y = 0.0;
+            this.YawAngle = 0.0;
+            this.Speed = 0.0;
+            this.YawRate = 0.0;
+
+            this.MotionPlanID = 0;
+
+            this.ImagePath = image_path
+            this.W = w;
+            this.H = h;
+        }
+
+        init(x,y,v,theta,PlanID)
+        {
+            this.X = x;
+            this.Y = y;
+            this.YawAngle = theta
+
+            this.SpeedTarget = v;
+            this.Speed = 0.0;
+            this.YawRate = 0.0;
+
+            this.MotionPlanID = PlanID;
+        }
+
+        move(dt)
+        {
+            this.YawAngle += this.YawRate*dt;
+            var angle =  Math.PI*this.YawAngle/180.0;
+
+            var a = this.SpeedTarget - this.Speed;
+            if(a > 2.0) a = 2.0;
+            if(a < -2.0) a = -2.0;
+            this.Speed += a*dt;
+
+            var v = this.Speed*dt/3.6;
+            this.X += Math.cos(angle)*v;
+            this.Y += Math.sin(angle)*v;
+        }
+
+        draw()
+        {
+            $('#canvas').drawImage({
+                                    source: this.ImagePath,
+                                    x: this.X,
+                                    y: this.Y,
+                                    width: this.W,
+                                    height: this.H,
+                                    rotate: this.YawAngle,
+                                    });
+        }
+
+        planning(time)
+        {
+            switch(this.MotionPlanID)
+            {
+            case 0:
+                break;
+            case 3:
+                if(time>50 && time <= 100) 
+                {
+                    this.Speed = 10.0;
+                    this.YawRate = 1.0;
+                }
+                else if(time>100 && time <= 150) 
+                {
+                    this.Speed = 10.0;
+                    this.YawRate = -1.0;
+                }
+                else 
+                {
+                    this.Speed = 14.0;
+                    this.YawRate = 0.0;
+                } 
+
+                break;
+            case 1:
+                if(time>60 && time <= 120) this.YawRate = -3.0;
+                else  this.YawRate = 0.0;
+                break;
+            case 4:
+                break;
+            case 2:
+                if(time>70 && time <= 120) 
+                {
+                    let dist = GetDistance(this);
+
+                    if(dist.lon > 150 && dist.lon < 400)
+                        this.Speed = 0.5;
+                    else
+                        this.Speed = 8.5;
+
+                    this.YawRate = -3.0;
+                }
+                else  
+                {
+                    this.Speed = 7.0;
+                    this.YawRate = 0.0;
+                }    
+                break;
+            case 5:
+                this.Speed = 16.0;
+                if(time>130 && time <= 150) 
+                {
+                    this.Speed = 7.0;
+                    this.YawRate = 6.0;
+                }
+                else if(time>150 && time <= 230) 
+                {
+                    this.Speed = 11.0;
+                    this.YawRate = 0.0;
+                }
+                else if(time>230 && time <= 250) 
+                {
+                    this.Speed = 7.0;
+                    this.YawRate = -6.0;
+                }
+                else 
+                {
+                    this.Speed = 14.0;
+                    this.YawRate = 0.0;
+                } 
+
+                break;
+            }
+        }
+
+        collision(target)
+        {
+
+        }
+    }
+
+    var ctx;
+    var SimFlag = false;
+    var gTime = 0;
+    var dt = 0.5;
+    var EgoVehicle = new Mobility('images/car.jpg',60,30);
+    var Pedestrian = new Mobility('images/ped.jpg',20,25);
+    var Cyclist = new Mobility('images/ped.jpg',35,25);
+
+    var RuleList = [];
+
+    function init() {
+        var canvas = document.getElementById('canvas');
+        if (canvas.getContext) 
+        {
+            ctx = canvas.getContext('2d');
+            
+            EgoVehicle.init(0.0,80.0,30.0,0.0,0);
+            Pedestrian.init(630.0,20.0,7.0,180.0, 0 );
+            Cyclist.init(230.0,25.0,15.0,0.0, 3 );
+
+            gTime = 0;
+            setInterval(draw, 33);
+        }
+    }
+    
+    function ResetSim() 
+    {
+        EgoVehicle.init(0.0,80.0,30.0,0.0,0);
+
+        let PlanID = Math.floor( Math.random() * 3  );
+        Pedestrian.init(630.0,20.0,7.0,180.0,PlanID);
+        Cyclist.init(230.0,25.0,15.0,0.0,PlanID+3);
+
+        gTime = 0;
+        SimFlag = false;
+    }
+
+    function StartSim() { SimFlag = true; }
+
+    function GetPosition(target_id)
+    {
+        var PlaceID = Place.OnCourse;
+        
+        if (target_id == TrafficParticipant.EgoVehicle)
+        {
+            PlaceID = Place.OnCourse;
+        }
+        else if(target_id == TrafficParticipant.Pedestrian )
+        {
+            if (Pedestrian.Y <= 44 || Pedestrian.Y > 152) PlaceID = Place.OnSideWalk;
+            else if (Pedestrian.X > 495 && Pedestrian.X < 555) PlaceID = Place.OnCrosswalk;
+            else if (Pedestrian.Y > 45 && Pedestrian.Y > 115) PlaceID = Place.OnCourse;
+            else  PlaceID = Place.OnRoad;
+        }
+        else if(target_id == TrafficParticipant.Cyclist)
+        {
+            if (Cyclist.Y <= 44 || Cyclist.Y > 152) PlaceID = Place.OnSideWalk;
+            else if (Cyclist.X > 495 && Cyclist.X < 555) PlaceID = Place.OnCrosswalk;
+            else if (Cyclist.Y > 45 && Cyclist.Y > 115) PlaceID = Place.OnCourse;
+            else  PlaceID = Place.OnRoad;
+        }
+
+        return PlaceID;
+    }
+
+    function CheckPosition(rule)
+    {
+        if(rule.PositionID == Place.Any)return true;
+        return (GetPosition(rule.TargetType) == rule.PositionID);
+    }
+
+    function GetDistance(target)
+    {
+        var dist = {lon:0.0,lat:0.0};
+
+        dist.lon = target.X - EgoVehicle.X;
+
+        if(dist.lon >=  EgoVehicle.W/2)
+            dist.lon -= EgoVehicle.W/2;
+        else if(dist.lon <  -EgoVehicle.W/2)
+            dist.lon += EgoVehicle.W/2;
+        else 
+            dist.lon =  0.0;
+
+        dist.lat = Math.abs(target.Y - EgoVehicle.Y);
+
+        if(dist.lat >=  EgoVehicle.H/2)
+            dist.lat -= EgoVehicle.H/2;
+        else if(dist.lat <  -EgoVehicle.H/2)
+            dist.lat += EgoVehicle.H/2;
+        else 
+            dist.lat =  0.0;
+
+
+        return dist;
+    }
+
+    function DoEval(target_id,condition)
+    {
+        var dist = {lon:0.0,lat:0.0};
+
+        if (target_id == TrafficParticipant.EgoVehicle)
+        {
+        }
+        else if(target_id == TrafficParticipant.Pedestrian )
+        {
+            dist = GetDistance(Pedestrian);
+        }
+        else if(target_id == TrafficParticipant.Cyclist)
+        {
+            dist = GetDistance(Cyclist);
+        }
+
+        var value = 0.0;
+
+        if (condition.EvalFuncID == EvalType.DistanceLon) value = dist.lon;
+        else if(condition.EvalFuncID == EvalType.DistanceLat ) value = dist.lat;
+        else if(condition.EvalFuncID == EvalType.TTC) value = dist.lon*3.6/EgoVehicle.speed;
+
+        value = Math.abs(value);
+        var result = false;
+
+        if (condition.Operator == OperationType.Geator) result = (value > condition.Threshold);
+        else if(condition.Operator == OperationType.Equal) result = (value == condition.Threshold);
+        else if(condition.Operator == OperationType.Less) result = (value < condition.Threshold);
+
+        return result;
+    }
+
+    function DecisionMaking()
+    {
+        EgoVehicle.SpeedTarget = 30.0;
+
+        for(let rule of RuleList) 
+        {
+            var IsMatch = false;
+            if( CheckPosition(rule) )
+            {
+                IsMatch = true;
+                for(let c of rule.Conditions) 
+                {
+                    if( !DoEval(rule.TargetType,c) )
+                    {
+                        IsMatch = false;
+                        break;
+                    }
+                }
+            }
+            if(IsMatch && EgoVehicle.SpeedTarget > rule.TargetSpeed) 
+                EgoVehicle.SpeedTarget = rule.TargetSpeed;
+            
+        }
+    }
+
+
+    function draw_road()
+    {
+        ctx.globalCompositeOperation = "source-over";
+
+        ctx.fillStyle = "rgba(30,120,30,1.0)";
+        ctx.fillRect(0, 0, 800, 40);
+        ctx.fillRect(0, 160, 800, 40);
+
+        ctx.fillStyle = "rgba(80,80,80,1.0)";
+        ctx.fillRect(0, 40, 800, 120);
+
+        ctx.fillStyle = "rgba(255,255,255,1.0)";
+        ctx.fillRect(500, 55, 50, 10);
+        ctx.fillRect(500, 75, 50, 10);
+        ctx.fillRect(500, 95, 50, 10);
+        ctx.fillRect(500, 115, 50, 10);
+        ctx.fillRect(500, 135, 50, 10);
+
+        ctx.fillRect(460, 55, 10, 50);
+
+        ctx.fillRect(0, 44, 800, 4);
+        ctx.fillRect(0, 152, 800, 4);
+
+        ctx.strokeStyle = 'white';
+        ctx.beginPath();
+        for(let x=0;x<800;x+=100)
+        {
+            
+
+            ctx.moveTo(x, 40);
+            ctx.lineTo(x, 160);
+
+            
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.globalCompositeOperation = "lighter";
+    }
+
+    function draw() 
+    {
+        draw_road();
+        EgoVehicle.draw();
+        Pedestrian.draw();
+        Cyclist.draw();
+
+        if (gTime>500)  ResetSim();
+        if (!SimFlag) return;
+            
+        DecisionMaking();
+        EgoVehicle.move(dt);
+
+        Pedestrian.move(dt);
+        Pedestrian.planning(gTime);
+
+        Cyclist.move(dt);
+        Cyclist.planning(gTime);
+        
+        gTime++;
+    }
+
+    function GetDescription(rule)
+    {
+        var TargetText = ['歩行者','自転車','停止線'];
+        var PlaceText = ['どこでも','進路上','歩道上','車道上','横断歩道上'];
+        var EvalText = ['前後距離','左右距離','衝突までの時間'];
+        var OperatorText = ['より大きい','と同じ','より小さい'];
+
+        var text = TargetText[rule.TargetType] + 'が'
+                  +PlaceText[rule.PositionID] + 'にいる時、自車との'
+                  +EvalText[rule.Conditions[0].EvalFuncID] + 'が'
+                  +rule.Conditions[0].Threshold/10 + 'm'
+                  +OperatorText[rule.Conditions[0].Operator] + '場合、';
+        if(rule.TargetSpeed<=0)
+            text = text+'停車する。';
+        else
+            text = text+rule.TargetSpeed + 'km/hで走行する。';
+
+        return text;
+    }
+
+    function AddRule()
+    {
+        let rule_data = document.getElementById( "base_rule" );
+        let eval_data = document.getElementById( "eval_list" );
+        let speed_data = document.getElementById( "speed" );
+
+        var NewRule = new Decision();
+
+        NewRule.TargetType = rule_data.target.value;
+        NewRule.PositionID = rule_data.place.value;
+        NewRule.TargetSpeed = speed_data.value;
+
+        var NewCondition = new Evaluation();
+
+        NewCondition.EvalFuncID = eval_data.eval.value;
+        NewCondition.Operator = eval_data.operator.value;
+        NewCondition.Threshold = eval_data.threshold.value*10;
+
+        NewRule.Conditions.push(NewCondition);
+
+        RuleList.push(NewRule);
+
+        let op = document.createElement("option");
+        op.value = RuleList.length;
+        op.text = "rule" + op.value.toString();
+        NewRule.Name = op.text;
+        NewRule.Description = GetDescription(NewRule);
+
+        let rule_list =  document.getElementById("rule_list");
+        rule_list.appendChild(op);
+        rule_list.selectedIndex=op.value-1;
+
+        OnSelect();
+    
+    }
+
+    function DelRule()
+    {
+        let rule_list =  document.getElementById("rule_list");
+        let select_id = rule_list.selectedIndex 
+
+        RuleList.splice(select_id, 1);
+
+        for (let item of rule_list.children) 
+        {
+            if (item.selected === true)
+            {
+                rule_list.removeChild(item); 
+            }
+        }
+
+        if (RuleList.length > 0 )
+        {
+            rule_list.selectedIndex=0;
+        }
+            
+        OnSelect();
+    }
+
+    function OnSelect()
+    {
+        let text_area =  document.getElementById("description");
+
+        if(RuleList.length <= 0)
+        {
+            text_area.innerHTML = "";
+        }
+        else
+        {
+            let rule_list =  document.getElementById("rule_list");
+            let index_rule = rule_list.selectedIndex;
+
+            text_area.innerHTML =  RuleList[index_rule].Description;
+        }
+        
+    }
+    
+    </script>
+    <style >
+        canvas {
+        background-color: #000;
+        border: 1px solid #999;
+        }
+        body { 
+            font-size: large; 
+        }
+        select {
+        width: 200px;
+        }
+
+    </style>
+
+</head>
+
+<body onload="init();">
+
+    <p> シミュレーション：
+        <input type="button" value="Start" onclick="StartSim();"/>
+        <input type="button" value="Reset" onclick="ResetSim();"/>
+    </p>
+    <canvas id="canvas" width="800" height="200"></canvas>
+    <hr>
+    行動ルール：<div id='description'>(ルールを選択すると説明が出ます。)</div>
+    <select id="rule_list" size="10" onchange="OnSelect();">
+    </select><br>
+
+    
+    <input type="button" value="Delete rule" onclick="DelRule();"/>
+
+    <form id="base_rule"> 
+        <p>対象は？：
+            <input type="radio" name="target" value="1" checked>歩行者
+            <input type="radio" name="target" value="2">自転車
+            <input type="radio" name="target" value="3">停止線
+        </p>
+        <p> 対象の場所は？：
+            <input type="radio" name="place" value="0" checked>どこでも
+            <input type="radio" name="place" value="1">進路上
+            <input type="radio" name="place" value="2">歩道
+            <input type="radio" name="place" value="3">道路
+            <input type="radio" name="place" value="4">横断歩道
+        </p>
+    </form>
+    
+    <form id="eval_list">
+        <p>評価方法は？：
+            <input type="radio" name="eval" value="0" checked>前後距離
+            <input type="radio" name="eval" value="1">左右距離
+            <input type="radio" name="eval" value="2">衝突までの時間
+        </p>
+        
+        <p>その評価値が？：
+            <input type="number" name="threshold"> m 
+            <input type="radio" name="operator" value="0" checked>より大きい
+            <input type="radio" name="operator" value="1">と同じ
+            <input type="radio" name="operator" value="2">より小さい
+        </p>
+    </form>
+
+    速度は？：
+    <select id="speed" >
+        <option value="0">停車</option>
+        <option value="5">5 km/h</option>
+        <option value="10">10 km/h</option>
+        <option value="15">15 km/h</option>
+        <option value="20">20 km/h</option>
+        <option value="25">25 km/h</option>
+        <option value="30">30 km/h</option>
+    </select>
+
+    <input type="button" value="Add rule" onclick="AddRule();"/>
+        
+</body>
+
+</html>
