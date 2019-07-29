@@ -433,7 +433,7 @@
 
     function GetDescription(rule)
     {
-        var TargetText = ['歩行者','自転車','停止線'];
+        var TargetText = ['自車','歩行者','自転車','停止線'];
         var PlaceText = ['どこでも','進路上','歩道上','車道上','横断歩道上'];
         var EvalText = ['前後距離','左右距離','衝突までの時間'];
         var OperatorText = ['より大きい','と同じ','より小さい'];
@@ -583,7 +583,7 @@
         </p>
         
         <p>その評価値が？：
-            <input type="number" name="threshold"> m/秒 
+            <input type="number" name="threshold"> mまたは秒 
             <input type="radio" name="operator" value="0" checked>より大きい
             <input type="radio" name="operator" value="1">と同じ
             <input type="radio" name="operator" value="2">より小さい
